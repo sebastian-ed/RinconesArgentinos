@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rincones Argentinos — Alojamientos y Experiencias Locales</title>
+  <meta name="description" content="Encontrá los mejores alojamientos y experiencias locales en toda la Argentina. Cabañas, posadas, trekking, cabalgatas y más. Contacto directo con los proveedores.">
+  <meta property="og:title" content="Rincones Argentinos">
+  <meta property="og:description" content="La vidriera de turismo local de Argentina">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏔️</text></svg>">
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <a href="index.html" class="navbar-brand">
+    <div class="navbar-logo">🏔️</div>
+    <span class="navbar-name">Rincones <span>Argentinos</span></span>
+  </a>
+  <ul class="navbar-nav">
+    <li><a href="#seccion-explorar">Explorar</a></li>
+    <li><a href="#seccion-destinos">Destinos</a></li>
+    <li><a href="#seccion-unirse">Soy proveedor</a></li>
+    <li><a href="admin/index.html" class="btn-nav">Admin</a></li>
+  </ul>
+  <!-- Hamburger — solo visible en mobile -->
+  <button class="navbar-hamburger" id="btn-hamburger" aria-label="Abrir menú">
+    <span></span><span></span><span></span>
+  </button>
+</nav>
+
+<!-- Menú mobile -->
+<div class="navbar-mobile-menu" id="mobile-menu">
+  <a href="#seccion-explorar" onclick="cerrarMenu()">🗺️ Explorar</a>
+  <a href="#seccion-destinos" onclick="cerrarMenu()">📍 Destinos</a>
+  <a href="#seccion-unirse" onclick="cerrarMenu()">🏡 Soy proveedor</a>
+  <a href="admin/index.html">⚙️ Admin</a>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">🇦🇷 Turismo local argentino</div>
+  <h1>Descubrí los <em>rincones</em> de Argentina</h1>
+  <p>Alojamientos únicos y experiencias auténticas en cada pueblo y ciudad del país. Contacto directo, sin intermediarios.</p>
+
+  <div class="hero-search">
+    <select id="hero-provincia" class="select-provincia">
+      <option value="">Todas las provincias</option>
+    </select>
+    <select id="hero-tipo">
+      <option value="">Alojamiento o experiencia</option>
+      <option value="alojamiento">🏡 Alojamiento</option>
+      <option value="experiencia">🎯 Experiencia</option>
+    </select>
+    <button id="btn-hero-search">Buscar →</button>
+  </div>
+
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <strong id="stat-total">...</strong>
+      <span>Proveedores</span>
+    </div>
+    <div class="hero-stat">
+      <strong id="stat-destinos">...</strong>
+      <span>Destinos</span>
+    </div>
+    <div class="hero-stat">
+      <strong>23</strong>
+      <span>Provincias</span>
+    </div>
+  </div>
+</section>
+
+<!-- DESTINOS DESTACADOS -->
+<section id="seccion-destinos" class="seccion">
+  <div class="seccion-titulo">
+    <h2>Explorá por destino</h2>
+    <p>Desde la Patagonia hasta el NOA, tenemos proveedores en toda la Argentina</p>
+  </div>
+  <div class="destinos-grid" id="destinos-grid">
+    <div class="loading"><div class="loading-spinner"></div></div>
+  </div>
+</section>
+
+<!-- EXPLORAR / GRILLA PRINCIPAL -->
+<section id="seccion-explorar" class="seccion-explorar">
+  <div class="seccion">
+    <div class="seccion-titulo">
+      <h2>Toda la oferta</h2>
+      <p>Filtrá por provincia, destino, tipo o categoría</p>
+    </div>
+
+    <!-- Tabs tipo -->
+    <div class="tipo-tabs">
+      <button class="tipo-tab activo" data-tipo="">🗺️ Todo</button>
+      <button class="tipo-tab" data-tipo="alojamiento">🏡 Alojamientos</button>
+      <button class="tipo-tab" data-tipo="experiencia">🎯 Experiencias</button>
+    </div>
+
+    <!-- Filtros -->
+    <div class="filtros-container" id="filtros">
+      <div class="filtro-grupo">
+        <label>Provincia</label>
+        <select class="select-provincia">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="filtro-grupo">
+        <label>Destino</label>
+        <select class="select-destino">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div class="filtro-grupo">
+        <label>Categoría</label>
+        <select class="select-categoria">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="filtro-grupo">
+        <label>Buscar</label>
+        <input type="text" class="input-texto" placeholder="Nombre del lugar...">
+      </div>
+      <button class="btn-filtrar" id="btn-filtrar">Buscar</button>
+      <button class="btn-limpiar" id="btn-limpiar">Limpiar</button>
+    </div>
+
+    <!-- Grilla de resultados -->
+    <div class="grilla" id="grilla-proveedores">
+      <div class="loading" style="grid-column:1/-1">
+        <div class="loading-spinner"></div>
+        <p>Cargando proveedores...</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- UNIRSE COMO PROVEEDOR -->
+<section id="seccion-unirse" class="seccion">
+  <div class="cta-unirse" style="margin-bottom:4rem;">
+    <h2>¿Tenés un alojamiento o experiencia?</h2>
+    <p>Sumá tu negocio a Rincones Argentinos y llegá a viajeros de todo el país. ¡Es gratis!</p>
+    <button class="btn-blanco" onclick="scrollA('form-solicitud-section')">Quiero aparecer</button>
+  </div>
+
+  <div id="form-solicitud-section">
+    <div class="seccion-titulo">
+      <h2>Registrá tu negocio</h2>
+      <p>Completá el formulario y nos ponemos en contacto para cargar tu perfil</p>
+    </div>
+
+    <form class="form-solicitud" id="form-solicitud">
+      <div class="form-row">
+        <div class="form-grupo">
+          <label>Nombre del negocio *</label>
+          <input type="text" name="nombre_negocio" required placeholder="Cabaña El Rincón">
+        </div>
+        <div class="form-grupo">
+          <label>Tu nombre *</label>
+          <input type="text" name="nombre_contacto" required placeholder="Juan Pérez">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-grupo">
+          <label>Email *</label>
+          <input type="email" name="email" required placeholder="tu@email.com">
+        </div>
+        <div class="form-grupo">
+          <label>WhatsApp</label>
+          <input type="tel" name="whatsapp" placeholder="+54 9 11 1234 5678">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-grupo">
+          <label>Tipo *</label>
+          <select name="tipo" required>
+            <option value="">Seleccioná...</option>
+            <option value="alojamiento">🏡 Alojamiento</option>
+            <option value="experiencia">🎯 Experiencia / Actividad</option>
+          </select>
+        </div>
+        <div class="form-grupo">
+          <label>Provincia *</label>
+          <input type="text" name="provincia_solicitud" required placeholder="Buenos Aires">
+        </div>
+      </div>
+      <div class="form-grupo">
+        <label>Destino / Localidad *</label>
+        <input type="text" name="destino" required placeholder="Mar del Plata, Villa La Angostura, etc.">
+      </div>
+      <div class="form-grupo">
+        <label>Contanos sobre tu negocio</label>
+        <textarea name="descripcion" placeholder="Describí brevemente qué ofrecés, qué te hace especial, etc."></textarea>
+      </div>
+      <button type="submit" class="btn-submit-form">Enviar solicitud →</button>
+    </form>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div>
+      <a href="index.html" class="navbar-brand" style="margin-bottom:1rem; display:inline-flex;">
+        <div class="navbar-logo">🏔️</div>
+        <span class="navbar-name" style="color:white;">Rincones <span>Argentinos</span></span>
+      </a>
+      <p>La plataforma que conecta viajeros con alojamientos y experiencias auténticas en toda la Argentina. Sin intermediarios, contacto directo.</p>
+    </div>
+    <div>
+      <h4>Explorar</h4>
+      <ul>
+        <li><a href="#seccion-explorar">Alojamientos</a></li>
+        <li><a href="#seccion-explorar">Experiencias</a></li>
+        <li><a href="#seccion-destinos">Destinos</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Proveedores</h4>
+      <ul>
+        <li><a href="#seccion-unirse">Sumar mi negocio</a></li>
+        <li><a href="admin/index.html">Panel admin</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2025 Rincones Argentinos · Hecho con ❤️ en Argentina</span>
+    <span>Viajá diferente.</span>
+  </div>
+</footer>
+
+<!-- MODAL DETALLE -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" id="modal-close" aria-label="Cerrar">✕</button>
+    <div id="modal-contenido"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- SUPABASE SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<!-- CONFIG -->
+<script src="js/supabase-config.js"></script>
+<!-- APP -->
+<script src="js/app.js"></script>
+
+<!-- Hamburger toggle -->
+<script>
+  const btnHamburger = document.getElementById('btn-hamburger');
+  const mobileMenu   = document.getElementById('mobile-menu');
+  const body         = document.body;
+
+  btnHamburger.addEventListener('click', () => {
+    const abierto = mobileMenu.classList.toggle('abierto');
+    body.classList.toggle('no-scroll', abierto);
+    btnHamburger.setAttribute('aria-expanded', abierto);
+  });
+
+  function cerrarMenu() {
+    mobileMenu.classList.remove('abierto');
+    body.classList.remove('no-scroll');
+    btnHamburger.setAttribute('aria-expanded', false);
+  }
+
+  // Cerrar menú al hacer click afuera
+  document.addEventListener('click', (e) => {
+    if (!btnHamburger.contains(e.target) && !mobileMenu.contains(e.target)) {
+      cerrarMenu();
+    }
+  });
+
+  // Cerrar modal con botón
+  document.getElementById('modal-close')?.addEventListener('click', () => {
+    document.getElementById('modal-overlay').classList.remove('abierto');
+    body.classList.remove('no-scroll');
+  });
+
+  // Cerrar modal al clickear overlay
+  document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      e.currentTarget.classList.remove('abierto');
+      body.classList.remove('no-scroll');
+    }
+  });
+
+  // Helper scroll suave a sección
+  function scrollA(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  }
+</script>
+
+</body>
+</html>
