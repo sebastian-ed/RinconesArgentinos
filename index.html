@@ -743,8 +743,8 @@ input,select,textarea{font-family:var(--ff-body)}
 /* ================================================================
    CONFIG SUPABASE — reemplazar con tus credenciales reales
 ================================================================ */
-const SUPABASE_URL     = 'https://eurltsbyzztkvyhacxte.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_Y1UjiWzyRcas7wfCJaFILQ_467gOHC0';
+const SUPABASE_URL     = 'https://TU_PROJECT_ID.supabase.co';
+const SUPABASE_ANON_KEY = 'TU_ANON_KEY_AQUI';
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -873,12 +873,63 @@ async function initData() {
 
 async function handleAuthSession(session) {
   STATE.currentUser = session.user;
-  // Load proveedor perfil
   if (!STATE.usandoMock) {
-    const { data } = await db.from('proveedores').select('*,destinos(nombre,slug,provincias(nombre,slug)),categorias(nombre,slug,icono)').eq('user_id', session.user.id).single();
-    if (data) STATE.proveedorPerfil = data;
+    try {
+      // maybeSingle() devuelve null sin error si no existe la fila (a diferencia de single() que tira 400)
+      const { data, error } = await db
+        .from('proveedores')
+        .select('*,destinos(nombre,slug,provincias(nombre,slug)),categorias(nombre,slug,icono)')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data) {
+        STATE.proveedorPerfil = data;
+      } else {
+        // No existe el registro todavía — crearlo con datos mínimos
+        const meta = session.user.user_metadata || {};
+        const { data: nuevo, error: insertError } = await db
+          .from('proveedores')
+          .insert({
+            user_id: session.user.id,
+            nombre:  meta.negocio || meta.nombre || 'Mi negocio',
+            tipo:    meta.tipo    || 'alojamiento',
+            email:   session.user.email,
+            activo:  false,
+          })
+          .select()
+          .single();
+        if (insertError) {
+          // Si falla el insert (ej: RLS, email no confirmado), crear perfil local temporal
+          console.warn('No se pudo crear perfil en DB, usando local:', insertError.message);
+          STATE.proveedorPerfil = {
+            id: null, // sin ID real aún
+            user_id: session.user.id,
+            nombre:  meta.negocio || 'Mi negocio',
+            tipo:    meta.tipo    || 'alojamiento',
+            email:   session.user.email,
+            activo:  false,
+            imagenes: [], amenities: [], incluye: [],
+          };
+        } else {
+          STATE.proveedorPerfil = nuevo;
+        }
+      }
+    } catch (e) {
+      console.warn('Error al cargar perfil:', e.message);
+      // Crear perfil local de emergencia para que el dashboard funcione
+      STATE.proveedorPerfil = {
+        id: null,
+        user_id: session.user.id,
+        nombre: session.user.user_metadata?.negocio || 'Mi negocio',
+        tipo: session.user.user_metadata?.tipo || 'alojamiento',
+        email: session.user.email,
+        activo: false,
+        imagenes: [], amenities: [], incluye: [],
+      };
+    }
   } else {
-    // Demo: assign first mock proveedor to logged user
     STATE.proveedorPerfil = { ...PROVEEDORES_MOCK[0], user_id: session.user.id };
   }
   updateNavAuth();
@@ -1108,26 +1159,42 @@ async function handleRegister(e) {
       showToast('¡Cuenta creada! Completá tu perfil para aparecer en el sitio 🎉', 'success');
       setTimeout(() => navigateTo('dashboard'), 400);
     } else {
-      const { data: authData, error } = await db.auth.signUp({
+      const { data: authData, error: signUpError } = await db.auth.signUp({
         email: data.email, password: data.password,
         options: { data: { nombre: data.nombre, negocio: data.negocio, tipo: data.tipo, provincia: data.provincia } }
       });
-      if (error) throw error;
-      // Create proveedor record
+      if (signUpError) throw signUpError;
+
       if (authData.user) {
-        const { data: prov } = await db.from('proveedores').insert({
-          user_id: authData.user.id,
-          nombre: data.negocio,
-          tipo: data.tipo,
-          email: data.email,
-          activo: false,
-        }).select().single();
-        STATE.proveedorPerfil = prov;
         STATE.currentUser = authData.user;
+        // Intentar crear el registro del proveedor.
+        // Puede fallar si el email no fue confirmado todavía (RLS sin sesión).
+        // En ese caso handleAuthSession lo creará automáticamente al confirmar e ingresar.
+        try {
+          const { data: prov, error: insertError } = await db.from('proveedores').insert({
+            user_id: authData.user.id,
+            nombre:  data.negocio,
+            tipo:    data.tipo,
+            email:   data.email,
+            activo:  false,
+          }).select().single();
+          STATE.proveedorPerfil = insertError ? null : prov;
+        } catch(_) {
+          STATE.proveedorPerfil = null; // handleAuthSession lo creará al loguear
+        }
       }
+
       closeAuth();
-      showToast('¡Cuenta creada! Revisá tu email para confirmar.', 'success');
-      setTimeout(() => navigateTo('dashboard'), 400);
+      updateNavAuth();
+
+      // ¿Tiene sesión activa ya? (email auto-confirmado en algunos proyectos)
+      const { data: { session: activeSession } } = await db.auth.getSession();
+      if (activeSession) {
+        showToast('¡Cuenta creada! Completá tu perfil 🎉', 'success');
+        setTimeout(() => navigateTo('dashboard'), 400);
+      } else {
+        showToast('¡Cuenta creada! Revisá tu email para confirmar y luego ingresá.', 'success');
+      }
     }
   } catch(err) {
     showToast(err.message.includes('already registered') ? 'Este email ya tiene una cuenta' : err.message, 'error');
@@ -1148,12 +1215,22 @@ async function doLogout() {
 ================================================================ */
 function renderDashboard() {
   if (!STATE.currentUser) { openAuth('login'); return; }
-  const p = STATE.proveedorPerfil;
-  if (!p) { document.getElementById('dash-main-content').innerHTML = '<div style="text-align:center;padding:4rem"><p>Cargando perfil...</p></div>'; return; }
-  // Init edit state from proveedor
-  STATE.dashEdit = { ...p };
-  STATE.dashAmenities = [...(p.amenities || p.incluye || [])];
-  STATE.dashImagenes = [...(p.imagenes || [])];
+  // Si todavía no tiene perfil, crear uno vacío local para que el dashboard funcione
+  if (!STATE.proveedorPerfil) {
+    STATE.proveedorPerfil = {
+      id: null,
+      user_id: STATE.currentUser.id,
+      nombre: STATE.currentUser.user_metadata?.negocio || 'Mi negocio',
+      tipo: STATE.currentUser.user_metadata?.tipo || 'alojamiento',
+      email: STATE.currentUser.email || '',
+      activo: false,
+      descripcion: '', descripcion_corta: '',
+      imagenes: [], amenities: [], incluye: [],
+    };
+  }
+  STATE.dashEdit = { ...STATE.proveedorPerfil };
+  STATE.dashAmenities = [...(STATE.proveedorPerfil.amenities || STATE.proveedorPerfil.incluye || [])];
+  STATE.dashImagenes   = [...(STATE.proveedorPerfil.imagenes  || [])];
   showDashSection('overview');
 }
 
@@ -1377,39 +1454,67 @@ function bindDashPerfil() {
 async function savePerfil() {
   const btn = document.getElementById('dash-save-perfil-btn');
   const status = document.getElementById('dash-save-status');
-  btn.disabled = true; btn.textContent = 'Guardando...';
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
   const updates = {
-    nombre: document.getElementById('de-nombre')?.value || '',
-    tipo: document.getElementById('de-tipo')?.value || '',
-    descripcion_corta: document.getElementById('de-desc-corta')?.value || '',
-    descripcion: document.getElementById('de-descripcion')?.value || '',
-    precio_desde: parseFloat(document.getElementById('de-precio')?.value) || null,
-    capacidad_personas: parseInt(document.getElementById('de-capacidad')?.value) || null,
-    duracion: document.getElementById('de-duracion')?.value || '',
-    direccion: document.getElementById('de-direccion')?.value || '',
+    nombre:            document.getElementById('de-nombre')?.value?.trim() || '',
+    tipo:              document.getElementById('de-tipo')?.value || '',
+    descripcion_corta: document.getElementById('de-desc-corta')?.value?.trim() || '',
+    descripcion:       document.getElementById('de-descripcion')?.value?.trim() || '',
+    precio_desde:      parseFloat(document.getElementById('de-precio')?.value) || null,
+    capacidad_personas:parseInt(document.getElementById('de-capacidad')?.value) || null,
+    duracion:          document.getElementById('de-duracion')?.value?.trim() || '',
+    direccion:         document.getElementById('de-direccion')?.value?.trim() || '',
   };
-  const destNombre = document.getElementById('de-destino-nombre')?.value;
-  const provNombre = document.getElementById('de-provincia')?.value;
+  const destNombre = document.getElementById('de-destino-nombre')?.value?.trim();
+  const provNombre = document.getElementById('de-provincia')?.value?.trim();
 
   try {
-    await new Promise(r => setTimeout(r, 600)); // simulate API
-    if (!STATE.usandoMock && STATE.proveedorPerfil?.id) {
-      await db.from('proveedores').update(updates).eq('id', STATE.proveedorPerfil.id);
+    if (!STATE.usandoMock) {
+      const p = STATE.proveedorPerfil;
+      if (p?.id) {
+        // Registro ya existe → UPDATE
+        const { error } = await db.from('proveedores').update(updates).eq('id', p.id);
+        if (error) throw error;
+      } else {
+        // No existe todavía (ej: perfil local de emergencia) → INSERT
+        const { data: nuevo, error } = await db
+          .from('proveedores')
+          .insert({ ...updates, user_id: STATE.currentUser.id, email: STATE.currentUser.email, activo: false })
+          .select()
+          .single();
+        if (error) throw error;
+        STATE.proveedorPerfil = { ...(STATE.proveedorPerfil || {}), ...nuevo };
+      }
     }
-    // Update local state
+
+    // Actualizar estado local
+    if (!STATE.proveedorPerfil) STATE.proveedorPerfil = {};
     Object.assign(STATE.proveedorPerfil, updates);
-    if (destNombre) STATE.proveedorPerfil.destino = { ...STATE.proveedorPerfil.destino, nombre: destNombre };
+    if (destNombre) {
+      STATE.proveedorPerfil.destino = {
+        ...(STATE.proveedorPerfil.destino || {}),
+        nombre: destNombre,
+        slug: destNombre.toLowerCase().replace(/\s+/g, '-'),
+        provincias: { nombre: provNombre || '', slug: (provNombre||'').toLowerCase().replace(/\s+/g, '-') },
+      };
+    }
     STATE.dashEdit = { ...STATE.proveedorPerfil };
-    // Update in proveedores list
-    const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil.id);
+
+    // Actualizar en lista pública si existe
+    const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil?.id);
     if (idx >= 0) Object.assign(STATE.proveedores[idx], updates);
-    status.textContent = '✓ Guardado';
-    status.style.color = 'var(--green)';
+
+    if (status) { status.textContent = '✓ Guardado'; status.style.color = 'var(--green)'; }
     showToast('Perfil actualizado correctamente', 'success');
-    setTimeout(() => { if(status) status.textContent = ''; }, 3000);
+    setTimeout(() => { const s = document.getElementById('dash-save-status'); if(s) s.textContent = ''; }, 3000);
   } catch(err) {
     showToast('Error al guardar: ' + err.message, 'error');
-  } finally { btn.disabled = false; btn.textContent = '💾 Guardar cambios'; }
+    console.error('savePerfil error:', err);
+  } finally {
+    const b = document.getElementById('dash-save-perfil-btn');
+    if (b) { b.disabled = false; b.textContent = '💾 Guardar cambios'; }
+  }
 }
 
 function renderDashImagenes() {
@@ -1503,21 +1608,35 @@ function renderImgPreviews() {
   </div>`).join('');
 }
 async function saveImagenes() {
-  const btn = document.querySelector('.dash-save-btn');
+  const btn = document.querySelector('#page-dashboard .dash-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-  await new Promise(r => setTimeout(r, 500));
-  STATE.proveedorPerfil.imagenes = [...STATE.dashImagenes];
-  STATE.proveedorPerfil.imagen_principal = STATE.dashImagenes[0] || '';
-  const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil.id);
-  if (idx >= 0) {
-    STATE.proveedores[idx].imagenes = STATE.proveedorPerfil.imagenes;
-    STATE.proveedores[idx].imagen_principal = STATE.proveedorPerfil.imagen_principal;
+  try {
+    const imgUpdates = { imagenes: [...STATE.dashImagenes], imagen_principal: STATE.dashImagenes[0] || null };
+    if (!STATE.usandoMock) {
+      const p = STATE.proveedorPerfil;
+      if (p?.id) {
+        const { error } = await db.from('proveedores').update(imgUpdates).eq('id', p.id);
+        if (error) throw error;
+      } else {
+        const { data: nuevo, error } = await db.from('proveedores')
+          .insert({ ...imgUpdates, user_id: STATE.currentUser.id, email: STATE.currentUser.email, nombre: p?.nombre||'Mi negocio', tipo: p?.tipo||'alojamiento', activo: false })
+          .select().single();
+        if (error) throw error;
+        STATE.proveedorPerfil = { ...(STATE.proveedorPerfil||{}), ...nuevo };
+      }
+    }
+    if (!STATE.proveedorPerfil) STATE.proveedorPerfil = {};
+    Object.assign(STATE.proveedorPerfil, imgUpdates);
+    const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil?.id);
+    if (idx >= 0) Object.assign(STATE.proveedores[idx], imgUpdates);
+    showToast('Imágenes guardadas correctamente', 'success');
+  } catch(err) {
+    showToast('Error al guardar imágenes: ' + err.message, 'error');
+    console.error('saveImagenes error:', err);
+  } finally {
+    const b = document.querySelector('#page-dashboard .dash-save-btn');
+    if (b) { b.disabled = false; b.textContent = '💾 Guardar imágenes'; }
   }
-  if (!STATE.usandoMock && STATE.proveedorPerfil.id) {
-    await db.from('proveedores').update({ imagenes: STATE.dashImagenes, imagen_principal: STATE.dashImagenes[0]||null }).eq('id', STATE.proveedorPerfil.id);
-  }
-  showToast('Imágenes guardadas correctamente', 'success');
-  if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar imágenes'; }
 }
 
 function renderDashServicios() {
@@ -1582,25 +1701,39 @@ function renderAmenityTags() {
   </span>`).join('');
 }
 async function saveServicios() {
-  const btn = document.querySelector('.dash-save-btn');
+  const btn = document.querySelector('#page-dashboard .dash-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-  await new Promise(r => setTimeout(r, 500));
-  const isAloj = STATE.proveedorPerfil.tipo !== 'experiencia';
-  if (isAloj) {
-    STATE.proveedorPerfil.amenities = [...STATE.dashAmenities];
-    STATE.proveedorPerfil.incluye = [];
-  } else {
-    STATE.proveedorPerfil.incluye = [...STATE.dashAmenities];
-    STATE.proveedorPerfil.amenities = [];
-  }
-  const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil.id);
-  if (idx >= 0) STATE.proveedores[idx] = { ...STATE.proveedorPerfil };
-  if (!STATE.usandoMock && STATE.proveedorPerfil.id) {
+  try {
+    const isAloj = (STATE.proveedorPerfil?.tipo || 'alojamiento') !== 'experiencia';
     const field = isAloj ? 'amenities' : 'incluye';
-    await db.from('proveedores').update({ [field]: STATE.dashAmenities }).eq('id', STATE.proveedorPerfil.id);
+    const otherField = isAloj ? 'incluye' : 'amenities';
+    const srvUpdates = { [field]: [...STATE.dashAmenities], [otherField]: [] };
+
+    if (!STATE.usandoMock) {
+      const p = STATE.proveedorPerfil;
+      if (p?.id) {
+        const { error } = await db.from('proveedores').update(srvUpdates).eq('id', p.id);
+        if (error) throw error;
+      } else {
+        const { data: nuevo, error } = await db.from('proveedores')
+          .insert({ ...srvUpdates, user_id: STATE.currentUser.id, email: STATE.currentUser.email, nombre: p?.nombre||'Mi negocio', tipo: p?.tipo||'alojamiento', activo: false })
+          .select().single();
+        if (error) throw error;
+        STATE.proveedorPerfil = { ...(STATE.proveedorPerfil||{}), ...nuevo };
+      }
+    }
+    if (!STATE.proveedorPerfil) STATE.proveedorPerfil = {};
+    Object.assign(STATE.proveedorPerfil, srvUpdates);
+    const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil?.id);
+    if (idx >= 0) Object.assign(STATE.proveedores[idx], srvUpdates);
+    showToast('Servicios guardados correctamente', 'success');
+  } catch(err) {
+    showToast('Error al guardar servicios: ' + err.message, 'error');
+    console.error('saveServicios error:', err);
+  } finally {
+    const b = document.querySelector('#page-dashboard .dash-save-btn');
+    if (b) { b.disabled = false; b.textContent = '💾 Guardar servicios'; }
   }
-  showToast('Servicios guardados correctamente', 'success');
-  if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar servicios'; }
 }
 
 function renderDashContacto() {
@@ -1661,27 +1794,44 @@ function renderDashContacto() {
 function bindDashContacto() { /* no special binding needed */ }
 
 async function saveContacto() {
-  const btn = document.querySelector('.dash-save-btn');
+  const btn = document.querySelector('#page-dashboard .dash-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
   const updates = {
-    whatsapp:   document.getElementById('dc-wsp')?.value?.replace(/\D/g,'') || '',
-    telefono:   document.getElementById('dc-tel')?.value || '',
-    email:      document.getElementById('dc-email')?.value || '',
-    sitio_web:  document.getElementById('dc-web')?.value || '',
-    instagram:  document.getElementById('dc-ig')?.value || '',
-    facebook:   document.getElementById('dc-fb')?.value || '',
-    direccion:  document.getElementById('dc-dir')?.value || '',
+    whatsapp:  document.getElementById('dc-wsp')?.value?.replace(/\D/g,'') || '',
+    telefono:  document.getElementById('dc-tel')?.value?.trim() || '',
+    email:     document.getElementById('dc-email')?.value?.trim() || '',
+    sitio_web: document.getElementById('dc-web')?.value?.trim() || '',
+    instagram: document.getElementById('dc-ig')?.value?.trim() || '',
+    facebook:  document.getElementById('dc-fb')?.value?.trim() || '',
+    direccion: document.getElementById('dc-dir')?.value?.trim() || '',
   };
-  await new Promise(r => setTimeout(r, 500));
-  Object.assign(STATE.proveedorPerfil, updates);
-  STATE.dashEdit = { ...STATE.proveedorPerfil };
-  const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil.id);
-  if (idx >= 0) Object.assign(STATE.proveedores[idx], updates);
-  if (!STATE.usandoMock && STATE.proveedorPerfil.id) {
-    await db.from('proveedores').update(updates).eq('id', STATE.proveedorPerfil.id);
+  try {
+    if (!STATE.usandoMock) {
+      const p = STATE.proveedorPerfil;
+      if (p?.id) {
+        const { error } = await db.from('proveedores').update(updates).eq('id', p.id);
+        if (error) throw error;
+      } else {
+        const { data: nuevo, error } = await db.from('proveedores')
+          .insert({ ...updates, user_id: STATE.currentUser.id, nombre: p?.nombre||'Mi negocio', tipo: p?.tipo||'alojamiento', activo: false })
+          .select().single();
+        if (error) throw error;
+        STATE.proveedorPerfil = { ...(STATE.proveedorPerfil||{}), ...nuevo };
+      }
+    }
+    if (!STATE.proveedorPerfil) STATE.proveedorPerfil = {};
+    Object.assign(STATE.proveedorPerfil, updates);
+    STATE.dashEdit = { ...STATE.proveedorPerfil };
+    const idx = STATE.proveedores.findIndex(x => x.id === STATE.proveedorPerfil?.id);
+    if (idx >= 0) Object.assign(STATE.proveedores[idx], updates);
+    showToast('Datos de contacto guardados', 'success');
+  } catch(err) {
+    showToast('Error al guardar contacto: ' + err.message, 'error');
+    console.error('saveContacto error:', err);
+  } finally {
+    const b = document.querySelector('#page-dashboard .dash-save-btn');
+    if (b) { b.disabled = false; b.textContent = '💾 Guardar contacto'; }
   }
-  showToast('Datos de contacto guardados', 'success');
-  if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar contacto'; }
 }
 
 function verPerfilPublico() {
